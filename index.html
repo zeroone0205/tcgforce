@@ -1,97 +1,256 @@
-// -------- 設定 --------
-// ★ここにスプレッドシートIDを入れてください
-const SPREADSHEET_ID = "18ppSXkGFKw1xAS7vptDGhLvOQ7AUoIWOcXhQfbvlb_c";
-
-// ★ここをCSVのシート名と完全に一致させました
-const ALLOWED_SHEETS = ["ポケモン", "ワンピース", "遊戯王", "ヴァイスシュバルツ","素体"]; 
-
-const HEADERS = ["id", "name", "type", "series", "grade", "price", "remaining", "active", "imageUrl"];
-
-// -------- 初期化（シート作成用）--------
-function initAllSheets() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  ALLOWED_SHEETS.forEach(sheetName => {
-    let sh = ss.getSheetByName(sheetName);
-    if (!sh) {
-      sh = ss.insertSheet(sheetName);
-      sh.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
-      sh.setFrozenRows(1);
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>買取表 | トレカショップ</title>
+  <style>
+    /* ベーススタイル */
+    :root {
+      --primary: #d32f2f;
+      --bg: #f5f7fa;
+      --white: #ffffff;
+      --text: #333;
+      --gray: #888;
+      --border: #ddd;
     }
-  });
-}
+    body { font-family: "Helvetica Neue", Arial, sans-serif; margin: 0; padding: 0; background: var(--bg); color: var(--text); }
+    * { box-sizing: border-box; }
 
-// -------- Web API --------
-function doGet(e) {
-  try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    /* ヘッダー */
+    header { background: var(--white); border-bottom: 1px solid var(--border); padding: 12px; text-align: center; }
+    h1 { margin: 0; font-size: 18px; color: var(--primary); }
+
+    /* カテゴリナビゲーション */
+    .nav-scroll { overflow-x: auto; background: var(--white); border-bottom: 1px solid var(--border); white-space: nowrap; padding: 0 10px; }
+    .nav-tabs { display: flex; gap: 16px; max-width: 1000px; margin: 0 auto; padding: 0; list-style: none; }
+    .nav-item { cursor: pointer; padding: 12px 0; font-weight: bold; color: var(--gray); border-bottom: 3px solid transparent; transition: 0.2s; font-size: 13px; }
+    .nav-item:hover { color: var(--primary); }
+    .nav-item.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+    /* 検索・フィルターエリア */
+    .filters { max-width: 1000px; margin: 16px auto; padding: 0 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .search-box { flex: 1; min-width: 150px; position: relative; }
+    .search-box input { width: 100%; padding: 8px 8px 8px 32px; border: 1px solid #ccc; border-radius: 6px; outline: none; font-size: 14px; }
+    .search-icon { position: absolute; left: 8px; top: 9px; color: #999; font-size: 14px; }
+    select, button { padding: 8px; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; font-size: 12px; }
+    button { background: var(--primary); color: #fff; border: none; font-weight: bold; }
+
+    /* カードリスト */
+    .container { max-width: 1000px; margin: 0 auto; padding: 0 12px 40px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
     
-    // パラメータ取得（デフォルトはリストの最初）
-    let category = (e?.parameter?.category || ALLOWED_SHEETS[0]);
-
-    if (!ALLOWED_SHEETS.includes(category)) {
-      return json_({ error: "無効なカテゴリです", allowed: ALLOWED_SHEETS });
-    }
-
-    const sh = ss.getSheetByName(category);
-    if (!sh) {
-      return json_({ error: `シート「${category}」が見つかりません。` });
-    }
-
-    const values = sh.getDataRange().getValues();
-    if (!values || values.length < 2) {
-      return json_({ category, count: 0, items: [] });
-    }
-
-    const headers = values.shift().map(h => String(h).trim());
-    let rows = values
-      .filter(r => r.some(v => v !== "" && v !== null))
-      .map(r => Object.fromEntries(headers.map((h, i) => [h, r[i]])));
-
-    // フィルタ処理
-    const q = (e?.parameter?.q || "").toLowerCase();
-    const type = e?.parameter?.type || "";
-    const sort = e?.parameter?.sort || "";
-    const hideZero = e?.parameter?.hideZero === "1";
-
-    if (q) {
-      rows = rows.filter(x => 
-        String(x.name || "").toLowerCase().includes(q) || 
-        String(x.series || "").toLowerCase().includes(q)
-      );
-    }
+    /* カードデザイン */
+    .card { background: var(--white); border-radius: 8px; overflow: hidden; border: 1px solid var(--border); transition: transform 0.2s; display: flex; flex-direction: column; position: relative; }
+    .card:hover { transform: translateY(-3px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
     
-    // activeがTRUEのものだけ表示
-    rows = rows.filter(x => String(x.active).toUpperCase() === "TRUE");
-    
-    if (type) rows = rows.filter(x => String(x.type) === type);
-    if (hideZero) rows = rows.filter(x => Number(x.remaining) > 0);
+    .card-img { width: 100%; aspect-ratio: 3/4; background: #eee; object-fit: contain; border-bottom: 1px solid #f0f0f0; }
+    .no-img { display: flex; align-items: center; justify-content: center; color: #ccc; font-size: 10px; background: #fafafa; }
 
-    // ★★★ データ整形 ★★★
-    rows = rows.map(x => {
-      const price = x.price ? Number(String(x.price).replace(/,/g, "")) : 0; // カンマ除去対応
-      const remaining = x.remaining ? Number(x.remaining) : 0;
-      
-      // グレード表示ロジック:
-      // 「type」が「シングル」の場合のみグレードを表示
-      let grade = x.grade;
-      if (String(x.type) !== "シングル") {
-        grade = ""; 
+    .card-body { padding: 8px; flex: 1; display: flex; flex-direction: column; }
+    
+    /* タイトル */
+    .card-title { font-size: 13px; font-weight: bold; line-height: 1.3; margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; height: 34px; }
+    
+    /* バッジエリア */
+    .card-tags { position: absolute; top: 4px; right: 4px; display: flex; flex-direction: column; gap: 2px; align-items: flex-end; }
+    
+    /* バッジスタイル */
+    .badge { 
+      display: inline-block; 
+      padding: 1px 5px; 
+      border-radius: 4px; 
+      font-size: 9px; 
+      font-weight: bold;
+      background: #333; 
+      color: #fff;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    }
+    .badge-psa { background: #d32f2f; }
+    .badge-sotai { background: #555555; } /* 素体用グレー */
+
+    .card-footer { margin-top: auto; border-top: 1px dotted #eee; padding-top: 6px; }
+    .price-label { font-size: 9px; color: var(--gray); }
+    .price-value { color: var(--primary); font-size: 16px; font-weight: 900; letter-spacing: -0.5px; }
+    .limit { font-size: 10px; color: #333; float: right; margin-top: 5px; }
+    
+    .loading { text-align: center; padding: 40px; color: var(--gray); grid-column: 1 / -1; }
+    .error { background: #ffebee; color: #c62828; padding: 10px; border-radius: 6px; margin-bottom: 20px; display: none; }
+
+    /* スマホ対応 */
+    @media (max-width: 600px) {
+      .grid { 
+        grid-template-columns: repeat(3, 1fr); /* 3列 */
+        gap: 6px; 
       }
+      .card-title { font-size: 10px; height: 28px; margin-bottom: 2px; }
+      .price-value { font-size: 13px; }
+      .price-label { font-size: 8px; }
+      .limit { font-size: 9px; margin-top: 3px; }
+      .card-body { padding: 6px; }
+      
+      .filters { gap: 6px; }
+      .search-box { width: 100%; order: -1; }
+      #reload { display: none; }
+    }
+  </style>
+</head>
+<body>
 
-      return { ...x, price, remaining, grade };
+  <header>
+    <h1>買取表</h1>
+  </header>
+
+  <div class="nav-scroll">
+    <ul class="nav-tabs" id="categoryTabs">
+      <li class="nav-item active" data-cat="ポケモン">ポケモン</li>
+      <li class="nav-item" data-cat="ワンピース">ワンピース</li>
+      <li class="nav-item" data-cat="遊戯王">遊戯王</li>
+      <li class="nav-item" data-cat="ヴァイス">ヴァイス</li>
+    </ul>
+  </div>
+
+  <div class="filters">
+    <div class="search-box">
+      <span class="search-icon">🔍</span>
+      <input id="q" placeholder="検索" />
+    </div>
+    
+    <select id="type">
+      <option value="">全タイプ</option>
+      <option value="シングル">シングル(素体)</option>
+      <option value="PSA10">PSA10</option>
+    </select>
+
+    <select id="sort">
+      <option value="">おすすめ</option>
+      <option value="price_desc">高い順</option>
+      <option value="price_asc">安い順</option>
+    </select>
+
+    <label style="display:flex; align-items:center; font-size:11px; cursor:pointer; gap:4px; margin-left:auto;">
+      <input type="checkbox" id="hideZero" checked> 募集中のみ
+    </label>
+    <button id="reload">更新</button>
+  </div>
+
+  <div class="container">
+    <div id="err" class="error"></div>
+    <div class="muted" id="meta" style="font-size:11px; margin-bottom:8px; text-align:right; color:#888;"></div>
+    
+    <div id="grid" class="grid"></div>
+  </div>
+
+  <script>
+    // ★★★ ここにデプロイしたURLを貼り付けてください ★★★
+    const API = "https://script.google.com/macros/s/AKfycbws7xU5Atr38IxYzXcq-Z6nWcM7Lu7QJcRV1TTWBScMrpkR7aeR1J8nISVDDJn4wuu5/exec";
+
+    let currentCategory = "ポケモン";
+
+    const el = (id) => document.getElementById(id);
+    const yen = (n) => "¥" + Number(n).toLocaleString();
+
+    async function load() {
+      const grid = el("grid");
+      grid.innerHTML = '<div class="loading">読み込み中...</div>';
+      el("err").style.display = "none";
+
+      const params = new URLSearchParams();
+      params.set("category", currentCategory);
+      
+      const q = el("q").value.trim();
+      if (q) params.set("q", q);
+      if (el("type").value) params.set("type", el("type").value);
+      if (el("sort").value) params.set("sort", el("sort").value);
+      if (el("hideZero").checked) params.set("hideZero", "1");
+
+      try {
+        const res = await fetch(`${API}?${params.toString()}`);
+        const data = await res.json();
+
+        if (data.error) {
+          el("err").textContent = data.error;
+          el("err").style.display = "block";
+          grid.innerHTML = "";
+          return;
+        }
+
+        el("meta").textContent = `${data.category} (${data.count}件)`;
+
+        if (data.items.length === 0) {
+          grid.innerHTML = '<div class="loading">該当なし</div>';
+          return;
+        }
+
+        grid.innerHTML = data.items.map(item => {
+          let imgTag = `<div class="card-img no-img">No Image</div>`;
+          if (item.imageUrl) {
+            imgTag = `<img src="${item.imageUrl}" class="card-img" alt="" loading="lazy" />`;
+          }
+
+          // ★★★ バッジ表示ロジック（ここが重要！） ★★★
+          let badgeHtml = "";
+          const type = (item.type || "").trim();
+          
+          if (type === "シングル") {
+             // 1. タイプがシングルの場合 → 「素体」バッジを表示
+             badgeHtml += `<span class="badge badge-sotai">素体</span>`;
+             
+             // 2. さらにグレード（状態）があれば追加表示
+             if (item.grade) {
+               badgeHtml += `<span class="badge">${item.grade}</span>`;
+             }
+          
+          } else if (type) {
+             // 3. PSAなどの場合 → そのタイプ名を表示
+             // GAS側でグレードを空にしているので、グレードバッジはここでは生成されません
+             const isPsa = type.toUpperCase().includes("PSA");
+             const badgeClass = isPsa ? "badge badge-psa" : "badge";
+             badgeHtml += `<span class="${badgeClass}">${type}</span>`;
+          }
+
+          return `
+            <div class="card">
+              ${imgTag}
+              <div class="card-tags">${badgeHtml}</div>
+              <div class="card-body">
+                <div class="card-title">${item.name}</div>
+                <div class="card-footer">
+                  <div class="price-label">買取価格</div>
+                  <div class="price-value">${yen(item.price)}</div>
+                  <div class="limit">残り:${item.remaining}</div>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join("");
+
+      } catch (e) {
+        grid.innerHTML = "";
+        el("err").textContent = "Error: " + e.message;
+        el("err").style.display = "block";
+      }
+    }
+
+    document.querySelectorAll(".nav-item").forEach(tab => {
+      tab.addEventListener("click", (e) => {
+        document.querySelectorAll(".nav-item").forEach(t => t.classList.remove("active"));
+        e.target.classList.add("active");
+        currentCategory = e.target.getAttribute("data-cat");
+        load(); 
+      });
     });
 
-    if (sort === "price_desc") rows.sort((a,b) => b.price - a.price);
-    if (sort === "price_asc")  rows.sort((a,b) => a.price - b.price);
+    ["type", "sort", "hideZero"].forEach(id => el(id).addEventListener("change", load));
+    el("reload").addEventListener("click", load);
+    
+    let timer;
+    el("q").addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(load, 400);
+    });
 
-    return json_({ category, count: rows.length, items: rows });
-
-  } catch (err) {
-    return json_({ error: "サーバーエラー", message: String(err) });
-  }
-}
-
-function json_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
-}
-
+    load();
+  </script>
+</body>
+</html>
