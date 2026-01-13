@@ -3,7 +3,7 @@
 const SPREADSHEET_ID = "18ppSXkGFKw1xAS7vptDGhLvOQ7AUoIWOcXhQfbvlb_c";
 
 // ★ここをCSVのシート名と完全に一致させました
-const ALLOWED_SHEETS = ["ポケモン", "ワンピース", "遊戯王", "ヴァイスシュバルツ"]; 
+const ALLOWED_SHEETS = ["ポケモン", "ワンピース", "遊戯王", "ヴァイスシュバルツ","素体"]; 
 
 const HEADERS = ["id", "name", "type", "series", "grade", "price", "remaining", "active", "imageUrl"];
 
@@ -94,3 +94,4 @@ function doGet(e) {
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
+
